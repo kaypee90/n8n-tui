@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -37,6 +38,7 @@ type credentialsScreen struct {
 
 	credTable *components.Table
 	varTable  *components.Table
+	errViews  [2]viewport.Model
 
 	width, height int
 }
@@ -62,7 +64,10 @@ func newCredentials(s *Session) *credentialsScreen {
 	})
 	vt.Empty = "No variables."
 	vt.Focused = false
-	return &credentialsScreen{s: s, credTable: ct, varTable: vt}
+	return &credentialsScreen{
+		s: s, credTable: ct, varTable: vt,
+		errViews: [2]viewport.Model{viewport.New(0, 0), viewport.New(0, 0)},
+	}
 }
 
 func (c *credentialsScreen) Init() tea.Cmd { return c.load() }
@@ -98,7 +103,15 @@ func (c *credentialsScreen) Keys() []keyHelp {
 	if c.reveal {
 		reveal = "mask values"
 	}
-	return []keyHelp{{"tab", "switch section"}, {"v", reveal}, {"r", "refresh"}}
+	keys := []keyHelp{{"tab", "credentials ↔ variables"}}
+	if c.section == 0 && c.credErr != nil || c.section == 1 && c.varErr != nil {
+		keys = append(keys, keyHelp{"↑/↓", "scroll error"})
+	}
+	return append(keys, keyHelp{"v", reveal}, keyHelp{"r", "refresh"})
+}
+
+func (c *credentialsScreen) About() string {
+	return "Credentials (names and types only: n8n never sends their secrets) and instance variables. Variable values are hidden until you press v."
 }
 
 func (c *credentialsScreen) SetSize(w, h int) {
@@ -108,6 +121,23 @@ func (c *credentialsScreen) SetSize(w, h int) {
 	credH := avail / 2
 	c.credTable.SetSize(w, credH)
 	c.varTable.SetSize(w, avail-credH)
+	for i, height := range []int{credH, avail - credH} {
+		c.errViews[i].Width, c.errViews[i].Height = w, height
+	}
+	c.syncErrors()
+}
+
+func (c *credentialsScreen) syncErrors() {
+	for i, section := range []struct {
+		name string
+		err  error
+	}{{"Credentials", c.credErr}, {"Variables", c.varErr}} {
+		content := ""
+		if section.err != nil {
+			content = sectionError(section.name, section.err, c.width)
+		}
+		c.errViews[i].SetContent(content)
+	}
 }
 
 func (c *credentialsScreen) Update(msg tea.Msg) tea.Cmd {
@@ -120,6 +150,7 @@ func (c *credentialsScreen) Update(msg tea.Msg) tea.Cmd {
 		sort.Slice(c.creds, func(i, j int) bool { return strings.ToLower(c.creds[i].Name) < strings.ToLower(c.creds[j].Name) })
 		sort.Slice(c.vars, func(i, j int) bool { return c.vars[i].Key < c.vars[j].Key })
 		c.rebuild()
+		c.syncErrors()
 		return nil
 
 	case tea.KeyMsg:
@@ -132,6 +163,20 @@ func (c *credentialsScreen) Update(msg tea.Msg) tea.Cmd {
 		case "v":
 			c.reveal = !c.reveal
 			c.rebuild()
+			return nil
+		}
+		if c.section == 0 && c.credErr != nil || c.section == 1 && c.varErr != nil {
+			view := &c.errViews[c.section]
+			switch msg.String() {
+			case "g", "home":
+				view.GotoTop()
+			case "G", "end":
+				view.GotoBottom()
+			default:
+				var cmd tea.Cmd
+				*view, cmd = view.Update(msg)
+				return cmd
+			}
 			return nil
 		}
 		if c.section == 0 {
@@ -162,14 +207,17 @@ func (c *credentialsScreen) rebuild() {
 	c.varTable.SetRows(vrows)
 }
 
-func sectionError(what string, err error) string {
+func sectionError(what string, err error, width int) string {
 	switch {
-	case api.IsUnauthorized(err):
-		return styleError.Render("✖ unauthorized — check the API key")
 	case api.IsUnsupported(err):
-		return styleWarn.Render(fmt.Sprintf("%s are not available on this instance (requires a newer n8n version, the right API key scope, or a license)", what))
+		need := "a newer n8n version or an API key with permission to list credentials"
+		if what == "Variables" {
+			need = "an n8n licence that includes variables, and an API key allowed to read them"
+		}
+		return styleWarn.Render(wrap(fmt.Sprintf("%s aren't available from this instance. This needs %s. "+
+			"Everything else in n8n-tui works without it.", what, need), width))
 	default:
-		return styleError.Render("✖ " + err.Error())
+		return styleError.Render(wrap("✖ "+describeError(err), width))
 	}
 }
 
@@ -186,23 +234,22 @@ func (c *credentialsScreen) View() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(title("Credentials", c.section == 0, len(c.creds)) +
-		styleMuted.Render("  · secret data is never retrieved") + "\n")
+	b.WriteString(line(title("Credentials", c.section == 0, len(c.creds))+
+		styleMuted.Render("  · secret data is never retrieved"), c.width) + "\n")
+	creds := c.credTable.View()
 	if c.credErr != nil {
-		b.WriteString(sectionError("Credentials", c.credErr) + "\n")
-	} else {
-		b.WriteString(c.credTable.View() + "\n")
+		creds = c.errViews[0].View()
 	}
-	b.WriteString("\n")
+	b.WriteString(block(creds, c.width, c.errViews[0].Height) + "\n\n")
 	hint := "  · values masked (v to reveal)"
 	if c.reveal {
 		hint = "  · values revealed (v to mask)"
 	}
-	b.WriteString(title("Variables", c.section == 1, len(c.vars)) + styleMuted.Render(hint) + "\n")
+	b.WriteString(line(title("Variables", c.section == 1, len(c.vars))+styleMuted.Render(hint), c.width) + "\n")
+	vars := c.varTable.View()
 	if c.varErr != nil {
-		b.WriteString(sectionError("Variables", c.varErr))
-	} else {
-		b.WriteString(c.varTable.View())
+		vars = c.errViews[1].View()
 	}
+	b.WriteString(block(vars, c.width, c.errViews[1].Height))
 	return b.String()
 }

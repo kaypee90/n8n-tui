@@ -37,14 +37,17 @@ type (
 type logsScreen struct {
 	s *Session
 
-	view     viewport.Model
-	lines    []string
-	follow   bool
-	paused   bool
-	started  bool
-	polling  bool
-	baseline bool
-	lastErr  string
+	view  viewport.Model
+	lines []string
+	// wrapped holds lines wrapped to wrapWidth, so a render only joins them.
+	wrapped   []string
+	wrapWidth int
+	follow    bool
+	paused    bool
+	started   bool
+	polling   bool
+	baseline  bool
+	lastErr   string
 
 	seen     map[string]models.ExecutionStatus
 	nodeSeen map[string]map[string]bool
@@ -64,7 +67,8 @@ func newLogs(s *Session) *logsScreen {
 
 func (l *logsScreen) Init() tea.Cmd {
 	l.started = true
-	l.appendLine(styleMuted.Render(fmt.Sprintf("— streaming executions from %s every %s —",
+	l.appendLine(styleMuted.Render(fmt.Sprintf("— watching %s for executions every %s. New runs appear here as they start, "+
+		"with one line per finished node. Run a workflow (t on the Workflows view) to see it in action. —",
 		l.s.Instance.Name, l.s.Config.RefreshInterval)))
 	return l.poll()
 }
@@ -85,13 +89,24 @@ func (l *logsScreen) Keys() []keyHelp {
 	if l.paused {
 		pause = "resume"
 	}
-	return []keyHelp{{"p", pause}, {"x", "clear"}, {"↑/↓", "scroll"}, {"G", "follow"}}
+	return []keyHelp{{"p", pause}, {"x", "clear"}, {"↑/↓", "scroll"}, {"G", "jump to newest"}}
+}
+
+func (l *logsScreen) About() string {
+	return "A live feed of executions as they start, as each node finishes, and when they succeed or fail. It checks n8n every refresh interval and keeps running while you use other views."
 }
 
 func (l *logsScreen) SetSize(w, h int) {
 	l.width, l.height = w, h
 	l.view.Width = w
 	l.view.Height = max(h-1, 1)
+	if w != l.wrapWidth {
+		l.wrapWidth = w
+		l.wrapped = make([]string, len(l.lines))
+		for i, line := range l.lines {
+			l.wrapped[i] = wrap(line, w)
+		}
+	}
 	l.render()
 }
 
@@ -213,7 +228,7 @@ func (l *logsScreen) Update(msg tea.Msg) tea.Cmd {
 			l.render()
 			return nil
 		case "x":
-			l.lines = nil
+			l.lines, l.wrapped = nil, nil
 			l.render()
 			return nil
 		case "G", "end":
@@ -363,13 +378,15 @@ func (l *logsScreen) emitNodes(ex models.Execution) {
 
 func (l *logsScreen) appendLine(s string) {
 	l.lines = append(l.lines, s)
+	l.wrapped = append(l.wrapped, wrap(s, l.wrapWidth))
 	if over := len(l.lines) - maxLogLines; over > 0 {
 		l.lines = append([]string(nil), l.lines[over:]...)
+		l.wrapped = append([]string(nil), l.wrapped[over:]...)
 	}
 }
 
 func (l *logsScreen) render() {
-	l.view.SetContent(strings.Join(l.lines, "\n"))
+	l.view.SetContent(strings.Join(l.wrapped, "\n"))
 	if l.follow {
 		l.view.GotoBottom()
 	}
@@ -382,7 +399,7 @@ func (l *logsScreen) View() string {
 	} else if l.lastErr != "" {
 		state = styleError.Render("✖ disconnected")
 	}
-	header := state + styleMuted.Render(fmt.Sprintf("  ·  %d tracked  ·  %d lines", l.inFlight(), len(l.lines)))
+	header := state + styleMuted.Render(fmt.Sprintf("  ·  %d running  ·  %d lines", l.inFlight(), len(l.lines)))
 	if !l.follow {
 		header += styleMuted.Render("  ·  scrolled (G to follow)")
 	}

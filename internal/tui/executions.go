@@ -85,11 +85,15 @@ func (e *executionsScreen) Refresh(auto bool) tea.Cmd { return e.load(auto) }
 func (e *executionsScreen) Capturing() bool { return false }
 
 func (e *executionsScreen) Keys() []keyHelp {
-	keys := []keyHelp{{"enter", "inspect"}, {"f", "status filter"}}
+	keys := []keyHelp{{"enter", "inspect"}, {"f", "filter by status"}}
 	if e.workflowID != "" {
-		keys = append(keys, keyHelp{"a", "all workflows"})
+		keys = append(keys, keyHelp{"a", "show all workflows"})
 	}
-	return append(keys, keyHelp{"R", "retry"}, keyHelp{"d", "delete"}, keyHelp{"r", "refresh"})
+	return append(keys, keyHelp{"R", "retry failed run"}, keyHelp{"d", "delete"}, keyHelp{"r", "refresh"})
+}
+
+func (e *executionsScreen) About() string {
+	return "Past and running executions (workflow runs), newest first. Press enter on one to see what every node did. Older runs load as you scroll down."
 }
 
 func (e *executionsScreen) SetSize(w, h int) {
@@ -342,7 +346,7 @@ func (e *executionsScreen) View() string {
 	parts = append(parts, "status: "+styleBold.Render(status))
 	switch {
 	case e.err != nil:
-		parts = append(parts, styleError.Render("✖ Refresh failed · r retry · ! details"))
+		parts = append(parts, styleError.Render("✖ Couldn't load executions · r retry · ! details"))
 	case !e.loaded:
 		parts = append(parts, "loading…")
 	default:
@@ -365,7 +369,7 @@ func (e *executionsScreen) View() string {
 	if !e.loaded {
 		e.table.Empty = "Loading executions…"
 		if e.err != nil {
-			e.table.Empty = "Unable to load executions. r retry · h health"
+			e.table.Empty = api.Explain(e.err).Summary + " · r retry · 6 health"
 		}
 	}
 	position := fmt.Sprintf("%d/%d · ↑/↓ navigate · enter inspect", e.table.Cursor()+1, len(e.rows))

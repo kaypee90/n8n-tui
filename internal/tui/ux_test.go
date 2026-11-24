@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kaypee90/n8n-tui/internal/api"
 	"github.com/kaypee90/n8n-tui/internal/models"
 )
 
@@ -125,7 +126,7 @@ func TestHelpAndMessagesAreScrollable(t *testing.T) {
 	assert.True(t, h.app.showHelp)
 	h.keys("G")
 	assert.True(t, h.app.showHelp)
-	assert.Contains(t, h.app.View(), "quit")
+	assert.Contains(t, h.app.View(), "confirmation")
 	assertFits(t, h.app.View(), 60, 16)
 	h.keys("esc")
 	text := strings.Repeat("A long connection error that should remain readable. ", 30) + "END_OF_ERROR"
@@ -185,14 +186,14 @@ func TestWebhookPresetClearsPreviousTarget(t *testing.T) {
 	assert.Equal(t, fieldPath, w.focus)
 	h.keys("ctrl+s")
 	assert.Empty(t, h.client().hooks)
-	assert.Contains(t, h.app.status, "path is required")
+	assert.Contains(t, h.app.status, "Enter a webhook path")
 }
 
 func TestRefreshFailureKeepsWorkflowsVisible(t *testing.T) {
 	h := newHarness(t)
 	h.dispatch(workflowsMsg{err: errors.New("connection refused")})
 	assert.Contains(t, h.app.View(), "Lead Intake")
-	assert.Contains(t, h.app.View(), "Refresh failed")
+	assert.Contains(t, h.app.View(), "Couldn't load workflows")
 	h.keys("!")
 	assert.Contains(t, h.app.View(), "connection refused")
 	h.keys("esc")
@@ -217,4 +218,42 @@ func TestDeepExecutionHistoryDoesNotDisappearOnPoll(t *testing.T) {
 	assert.Contains(t, h.app.View(), "auto-refresh paused")
 	h.keys("r")
 	assert.Len(t, e.rows, 2, "explicit refresh returns to the newest executions")
+}
+
+func TestFirstLoadFailureExplainsInDetailsPane(t *testing.T) {
+	h := newHarness(t)
+	d := h.app.screens[scrDashboard].(*dashboardScreen)
+	d.loaded, d.all, d.visible = false, nil, nil
+	d.rebuild()
+	h.dispatch(workflowsMsg{err: &api.Error{StatusCode: 401, Method: "GET", Path: "/workflows"}})
+	view := h.app.View()
+	assert.Contains(t, view, "Can't reach n8n")
+	assert.Contains(t, view, "n8n rejected the API key")
+	assert.Contains(t, h.app.status, "Loading workflows failed")
+}
+
+func TestCredentialsErrorsStayWithinTheirSections(t *testing.T) {
+	h := newHarness(t)
+	h.client().credErr = &api.Error{StatusCode: 404}
+	h.keys("5")
+	for _, size := range [][2]int{{40, 12}, {60, 16}, {80, 24}} {
+		h.dispatch(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+		h.keys("tab")
+		assert.Contains(t, h.app.View(), "API_TOKEN", "variables remain accessible when credentials fail")
+		w, height := h.app.bodySize()
+		assertFits(t, h.app.current().View(), w, height)
+		assertFits(t, h.app.View(), size[0], size[1])
+		h.keys("tab", "G")
+		assert.Contains(t, h.app.View(), "works without it.", "the full credentials error can be scrolled")
+	}
+
+	h.dispatch(tea.WindowSizeMsg{Width: 40, Height: 12})
+	h.dispatch(credentialsMsg{
+		creds:  []models.Credential{{Name: "Slack Bot"}},
+		varErr: errors.New(strings.Repeat("Long variable error. ", 20) + "END_OF_VARIABLE_ERROR"),
+	})
+	h.keys("tab", "G")
+	assert.Contains(t, h.app.View(), "Slack Bot", "variable errors must not obscure credentials either")
+	assert.Contains(t, h.app.View(), "END_OF_VARIABLE_ERROR")
+	assertFits(t, h.app.current().View(), h.app.width, h.app.height-headerHeight-footerHeight)
 }

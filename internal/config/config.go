@@ -306,20 +306,31 @@ func MaskSecret(s string) string {
 	}
 }
 
-// Example is a starter config printed by `n8n-tui --init` style help.
-const Example = `instances:
-  - name: production
-    url: https://n8n.example.com
+// Example is the commented starter config printed by --example-config.
+const Example = `# n8n-tui configuration
+# Save as ~/.config/n8n-tui/config.yaml (or run "n8n-tui init" to create it for you).
+#
+# Each instance needs a url and an API key. Create the key in n8n under
+# Settings → n8n API. ${NAME} is replaced with the environment variable NAME,
+# so the key itself never has to be written to this file.
+
+instances:
+  - name: production                    # any name; shown in the header and Settings view
+    url: https://n8n.example.com        # the address you open n8n at (not /api/v1)
     api_key: ${N8N_API_KEY}
+
   - name: staging
     url: https://n8n-staging.example.com
     api_key: ${N8N_STAGING_API_KEY}
-    # Optional: basic auth for a reverse proxy in front of n8n
+    # Optional: basic auth, if a reverse proxy in front of n8n asks for a password
     # username: ${PROXY_USER}
     # password: ${PROXY_PASSWORD}
-    # Optional: separate host for webhooks (N8N_WEBHOOK_URL)
+    # Optional: webhooks served from a different host (n8n's WEBHOOK_URL setting)
     # webhook_url: https://hooks.example.com
-default_instance: production
-refresh_interval: 5s
-timeout: 10s
+    # Optional: accept a self-signed TLS certificate (development only)
+    # insecure_skip_verify: true
+
+default_instance: production   # used when you don't pass --instance
+refresh_interval: 5s           # how often views and the log stream poll n8n (min 500ms)
+timeout: 10s                   # how long to wait for each request
 `

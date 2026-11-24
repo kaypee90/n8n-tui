@@ -102,6 +102,7 @@ func TestClipboardInput(t *testing.T) {
 		h.keys("w")
 		w := h.app.current().(*webhookScreen)
 		w.body.SetValue("")
+		h.keys("enter") // start editing the body
 		t.Setenv("N8N_TUI_TEST_CLIPBOARD_TEXT", `{"name":"Ada"}`)
 		h.dispatch(textarea.Paste())
 		assert.Equal(t, `{"name":"Ada"}`, w.body.Value())
@@ -113,7 +114,7 @@ func TestWebhookPresetCyclePreservesMode(t *testing.T) {
 	h.keys("w")
 	w := h.app.current().(*webhookScreen)
 	// Select test mode using the same field and key as an interactive session.
-	h.run(w.setFocus(fieldMode))
+	h.run(w.setFocus(fieldMode, false))
 	h.keys("space")
 	require.True(t, w.test)
 	h.dispatch(tea.KeyMsg{Type: tea.KeyCtrlN})
@@ -121,7 +122,7 @@ func TestWebhookPresetCyclePreservesMode(t *testing.T) {
 	require.Len(t, h.client().hooks, 1)
 	assert.True(t, h.client().hooks[0].Test)
 	// Explicitly switching back to production must also survive preset changes.
-	h.run(w.setFocus(fieldMode))
+	h.run(w.setFocus(fieldMode, false))
 	h.keys("space")
 	require.False(t, w.test)
 	h.dispatch(tea.KeyMsg{Type: tea.KeyCtrlN})

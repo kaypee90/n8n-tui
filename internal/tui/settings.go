@@ -42,7 +42,13 @@ func newSettings(s *Session) *settingsScreen {
 func (st *settingsScreen) Init() tea.Cmd        { return nil }
 func (st *settingsScreen) Refresh(bool) tea.Cmd { return nil }
 func (st *settingsScreen) Capturing() bool      { return false }
-func (st *settingsScreen) Keys() []keyHelp      { return []keyHelp{{"enter", "connect to instance"}} }
+func (st *settingsScreen) Keys() []keyHelp {
+	return []keyHelp{{"enter", "connect to selected instance"}}
+}
+
+func (st *settingsScreen) About() string {
+	return "The n8n instances from your config file. Select one and press enter to switch to it. Edit the config file to add or change instances."
+}
 
 func (st *settingsScreen) SetSize(w, h int) {
 	st.width, st.height = w, h
@@ -98,7 +104,7 @@ func (st *settingsScreen) View() string {
 		st.table.View(),
 		"",
 		styleSection.UnsetMarginTop().Render("Configuration"),
-		row("Config file", path),
+		wrap(row("Config file", path), st.width),
 		row("Default", cfg.DefaultInstance),
 		row("Refresh", cfg.RefreshInterval.String()),
 		row("Timeout", cfg.Timeout.String()),
@@ -113,7 +119,8 @@ func (st *settingsScreen) View() string {
 	if editPath == "" {
 		editPath = config.DefaultPath()
 	}
-	lines = append(lines, "", styleMuted.Render(
-		"Edit "+editPath+" to add instances. Reference secrets as ${ENV_VAR} to keep them out of the file."))
+	lines = append(lines, "", styleMuted.Render(wrap(
+		"To add or change instances, edit "+editPath+" (or run `n8n-tui init`) and restart n8n-tui. "+
+			"Write secrets as ${ENV_VAR} so they stay out of the file.", st.width)))
 	return strings.Join(lines, "\n")
 }

@@ -297,7 +297,7 @@ func TestDeleteWorkflowRequiresConfirmation(t *testing.T) {
 	h := newHarness(t)
 	h.keys("d")
 	require.True(t, h.app.confirm.Active())
-	assert.Contains(t, h.app.View(), `Permanently delete workflow "Lead Intake"?`)
+	assert.Contains(t, h.app.View(), `Permanently delete workflow "Lead Intake" from n8n?`)
 	h.keys("n")
 	assert.False(t, h.app.confirm.Active())
 	assert.Empty(t, h.client().deleted)
@@ -395,8 +395,8 @@ func TestWebhookView(t *testing.T) {
 	require.Equal(t, scrWebhook, h.app.active)
 	ws := h.app.screens[scrWebhook].(*webhookScreen)
 	assert.Equal(t, "leads", ws.path.Value())
-	assert.True(t, ws.Capturing())
-	assert.Equal(t, fieldBody, ws.focus, "preset focuses the payload editor, even on first visit")
+	assert.False(t, ws.Capturing(), "opening the form must not trap view shortcuts")
+	assert.Equal(t, fieldBody, ws.focus, "preset selects the payload editor, even on first visit")
 
 	// Invalid JSON is rejected before sending.
 	ws.body.SetValue(`{"broken":`)
@@ -411,14 +411,36 @@ func TestWebhookView(t *testing.T) {
 	assert.False(t, h.client().hooks[0].Test)
 	assert.Contains(t, h.app.View(), `"ok": true`)
 
-	// "q" is typed into the editor rather than quitting.
-	h.typeText("q")
+	// While editing, "q" and digits are typed rather than acting as shortcuts.
+	h.keys("enter")
+	require.True(t, ws.Capturing())
+	h.typeText("q3")
 	assert.False(t, h.quit())
+	assert.Equal(t, scrWebhook, h.app.active)
 
 	h.keys("esc")
 	assert.False(t, ws.Capturing())
 	h.keys("esc")
 	assert.Equal(t, scrDashboard, h.app.active)
+}
+
+func TestWebhookFieldNavigationKeepsShortcuts(t *testing.T) {
+	h := newHarness(t)
+	h.keys("3")
+	ws := h.app.current().(*webhookScreen)
+	assert.False(t, ws.Capturing())
+	h.keys("up")
+	assert.Equal(t, fieldMode, ws.focus)
+	h.keys("enter")
+	assert.True(t, ws.test, "enter toggles the mode")
+	h.keys("down", "enter")
+	require.True(t, ws.Capturing())
+	h.typeText("hook")
+	h.keys("enter")
+	assert.False(t, ws.Capturing(), "enter finishes a single-line field")
+	assert.Equal(t, "hook", ws.path.Value())
+	h.keys("4")
+	assert.Equal(t, scrLogs, h.app.active, "number keys switch views when not typing")
 }
 
 func TestParseHeaders(t *testing.T) {
@@ -479,7 +501,7 @@ func TestCredentialsUnsupported(t *testing.T) {
 	h := newHarness(t)
 	h.client().credErr = &api.Error{StatusCode: 404}
 	h.keys("c")
-	assert.Contains(t, h.app.View(), "not available on this instance")
+	assert.Contains(t, h.app.View(), "aren't available from this instance")
 }
 
 func TestHealthView(t *testing.T) {
@@ -517,13 +539,33 @@ func TestHelpAndNavigation(t *testing.T) {
 	assert.False(t, h.app.showHelp)
 
 	h.keys("4", "5", "6", "esc")
-	assert.Equal(t, scrCredentials, h.app.active)
-	h.keys("esc", "esc", "esc")
+	assert.Equal(t, scrDashboard, h.app.active, "esc on a top-level view goes home")
+	h.keys("esc")
 	assert.Equal(t, scrDashboard, h.app.active)
+
+	h.keys("2", "enter")
+	require.Equal(t, scrDetail, h.app.active)
+	h.keys("esc")
+	assert.Equal(t, scrExecutions, h.app.active, "esc from the inspector returns to the list")
 }
 
 func TestNewUnknownInstance(t *testing.T) {
 	cfg := &config.Config{Instances: []config.Instance{{Name: "a", URL: "http://a"}}, RefreshInterval: time.Second}
 	_, err := New(cfg, "nope", nil)
 	assert.Error(t, err)
+}
+
+func TestLogsWrapOnceAndRewrapOnResize(t *testing.T) {
+	l := newLogs(&Session{})
+	l.SetSize(20, 10)
+	long := strings.Repeat("word ", 10)
+	l.appendLine(long)
+	assert.Contains(t, l.wrapped[0], "\n", "long lines wrap at the view width")
+	l.SetSize(200, 10)
+	assert.NotContains(t, l.wrapped[0], "\n", "a resize re-wraps stored lines")
+	for range maxLogLines + 5 {
+		l.appendLine("x")
+	}
+	assert.Len(t, l.lines, maxLogLines)
+	assert.Len(t, l.wrapped, maxLogLines, "wrapped lines are trimmed with the raw ones")
 }

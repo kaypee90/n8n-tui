@@ -94,9 +94,14 @@ func (d *dashboardScreen) Keys() []keyHelp {
 		return []keyHelp{{"enter", "apply"}, {"esc", "clear filter"}}
 	}
 	return []keyHelp{
-		{"tab", "switch pane"}, {"enter/e", "executions"}, {"space", "toggle active"}, {"/", "filter"},
-		{"f", "active filter"}, {"o", "sort"}, {"t", "trigger"}, {"w", "webhook…"}, {"d", "delete"}, {"r", "refresh"},
+		{"enter", "executions"}, {"space", "activate/deactivate"}, {"t", "run (webhook)"}, {"/", "search"},
+		{"tab", "details pane"}, {"f", "show all / active / inactive"}, {"o", "sort by name / last update"},
+		{"w", "open in webhook form"}, {"d", "delete"}, {"r", "refresh"},
 	}
+}
+
+func (d *dashboardScreen) About() string {
+	return "Every workflow on the instance. Pick one to see its details on the right, its run history (enter), or to switch it on and off (space)."
 }
 
 func (d *dashboardScreen) SetSize(w, h int) {
@@ -144,6 +149,7 @@ func (d *dashboardScreen) Update(msg tea.Msg) tea.Cmd {
 		recovered := d.err != nil && msg.err == nil
 		d.err = msg.err
 		if msg.err != nil {
+			d.syncPreview() // the details pane explains the failure
 			return errStatus("Loading workflows", msg.err)
 		}
 		d.loaded = true
@@ -202,8 +208,9 @@ func (d *dashboardScreen) Update(msg tea.Msg) tea.Cmd {
 		}
 		r := msg.resp
 		ok := r.StatusCode >= 200 && r.StatusCode < 300
-		text := fmt.Sprintf("Triggered %q → %s in %s", msg.name, r.Status, components.Duration(r.Duration))
+		text := fmt.Sprintf("Triggered %q → %s in %s · e shows its executions", msg.name, r.Status, components.Duration(r.Duration))
 		if !ok {
+			text = fmt.Sprintf("Triggered %q but n8n answered %s", msg.name, r.Status)
 			text += " — " + strings.TrimSpace(truncate(string(r.Body), 120))
 		}
 		return statusCmd(text, !ok)
@@ -293,7 +300,7 @@ func (d *dashboardScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return workflowDeletedMsg{id: id, name: name, err: c.DeleteWorkflow(ctx, id)}
 		})
 		return send(confirmMsg{
-			prompt: fmt.Sprintf("Permanently delete workflow %q?", name),
+			prompt: fmt.Sprintf("Permanently delete workflow %q from n8n? This cannot be undone.", name),
 			onYes:  tea.Batch(statusCmd(fmt.Sprintf("Deleting %q…", name), false), del),
 		})
 	}
@@ -327,11 +334,11 @@ func (d *dashboardScreen) trigger() tea.Cmd {
 	triggers := wf.WebhookTriggers()
 	if len(triggers) == 0 {
 		return statusCmd(fmt.Sprintf(
-			"%q has no Webhook trigger node — the n8n API can only start workflows via webhooks", wf.Name), true)
+			"%q has no Webhook trigger node, so it can't be started from here (n8n's API only starts workflows through webhooks). Add a Webhook node in the n8n editor.", wf.Name), true)
 	}
 	if !wf.Active {
 		return statusCmd(fmt.Sprintf(
-			"%q is inactive: production webhooks only work for active workflows (space to activate, w for test webhook)", wf.Name), true)
+			"%q is inactive, and n8n only answers production webhooks for active workflows. Press space to activate it, or w to send a test webhook.", wf.Name), true)
 	}
 	trg := triggers[0]
 	req := api.WebhookRequest{Method: trg.Method, Path: trg.Path}
@@ -397,7 +404,7 @@ func (d *dashboardScreen) View() string {
 	case d.filterOn || d.filter.Value() != "":
 		summary = d.filter.View()
 	case d.err != nil:
-		summary = styleError.Render("✖ Refresh failed · r retry · ! details")
+		summary = styleError.Render("✖ Couldn't load workflows · r retry · ! details")
 	case !d.loaded:
 		summary = styleMuted.Render("Loading workflows…")
 	default:
@@ -417,14 +424,14 @@ func (d *dashboardScreen) View() string {
 		order = "name"
 	}
 	filters := styleMuted.Render(fmt.Sprintf("%s · sort: %s", []string{"all states", "active only", "inactive only"}[d.status], order))
-	d.table.Empty = "No workflows yet. r refresh"
+	d.table.Empty = "No workflows yet. Create one in the n8n editor, then press r."
 	if !d.loaded {
-		d.table.Empty = "Waiting for workflows…"
+		d.table.Empty = "Connecting to " + d.s.Instance.Name + "…"
 		if d.err != nil {
-			d.table.Empty = "Check connection: h health · s settings"
+			d.table.Empty = api.Explain(d.err).Summary
 		}
 	} else if d.filter.Value() != "" || d.status != 0 {
-		d.table.Empty = "No matches. esc clears filters"
+		d.table.Empty = "Nothing matches. esc clears the filter, f shows all states."
 	}
 	position := fmt.Sprintf("%d/%d · tab preview", d.table.Cursor()+1, len(d.visible))
 	left := panel("Workflows", position, line(summary, p.lw-4)+"\n"+line(filters, p.lw-4)+"\n"+d.table.View(), p.lw, p.lh, d.focus == 0)
@@ -447,7 +454,13 @@ func (d *dashboardScreen) syncPreview() {
 func (d *dashboardScreen) detailView() string {
 	wf, ok := d.SelectedWorkflow()
 	if !ok {
-		return styleMuted.Render("Select a workflow to inspect its details.\n\n↑/↓ or j/k navigate · / filter\nenter opens executions · ? all shortcuts")
+		if d.err != nil && !d.loaded {
+			return styleError.Render("Can't reach n8n") + "\n\n" + describeError(d.err) + "\n\n" +
+				styleMuted.Render("r try again · 6 Health (checks each part of the connection) · 7 Settings · ! full error")
+		}
+		return styleMuted.Render("Select a workflow to see its details here.\n\n" +
+			"↑/↓ move · / search · enter show its executions\n" +
+			"space turn on/off · t run it · ? every shortcut")
 	}
 	lines := []string{
 		styleBold.Render(wf.Name),
@@ -467,7 +480,7 @@ func (d *dashboardScreen) detailView() string {
 			lines = append(lines, styleWarn.Render("Inactive · space to activate, w for a test webhook"))
 		}
 	} else {
-		lines = append(lines, styleMuted.Render("None · cannot be triggered remotely"))
+		lines = append(lines, styleMuted.Render("None. Add a Webhook trigger node in n8n to run this workflow from n8n-tui."))
 	}
 	lines = append(lines, "", styleSection.UnsetMarginTop().Render(fmt.Sprintf("Nodes (%d)", len(wf.Nodes))))
 	for _, n := range wf.Nodes {

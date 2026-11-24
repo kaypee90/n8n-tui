@@ -71,7 +71,7 @@ var tabs = []struct {
 var globalKeys = []keyHelp{
 	{"1-7", "switch view"},
 	{"[ / ]", "previous / next view"},
-	{"ctrl+p", "search actions and views"},
+	{"ctrl+p", "search every action by name"},
 	{"↑/↓ · j/k", "move selection / scroll"},
 	{"g/G · home/end", "first / last row"},
 	{"pgup/pgdown", "previous / next page"},
@@ -82,9 +82,9 @@ var globalKeys = []keyHelp{
 	{"h", "instance health"},
 	{"s", "settings / switch instance"},
 	{"r", "refresh"},
-	{"esc", "back"},
+	{"esc", "back (from the inspector), otherwise return to Workflows"},
 	{"?", "toggle help"},
-	{"!", "show last message"},
+	{"!", "show the full last message (errors include how to fix them)"},
 	{"q / ctrl+c", "quit"},
 }
 
@@ -214,6 +214,9 @@ func (a *App) update(msg tea.Msg) tea.Cmd {
 		a.statusID++
 		a.status, a.statusErr = msg.text, msg.isErr
 		a.lastMessage = msg.text
+		if msg.detail != "" {
+			a.lastMessage += "\n\n" + msg.detail
+		}
 		if msg.isErr {
 			return nil // failures stay visible until replaced or dismissed
 		}
@@ -354,7 +357,15 @@ func (a *App) handleKey(msg tea.KeyMsg) tea.Cmd {
 		if a.status != "" {
 			a.status = ""
 		}
-		return a.back()
+		// Drill-down views return to where they were opened from; top-level
+		// views go home. Walking the whole history on esc is disorienting.
+		if a.active == scrDetail {
+			return a.back()
+		}
+		if a.active != scrDashboard {
+			return a.navigate(scrDashboard)
+		}
+		return nil
 	case "[", "]":
 		return a.cycleView(k == "]")
 	case "r":
@@ -540,13 +551,17 @@ func (a *App) footerView() string {
 		}
 	}
 	hints = strings.TrimSpace(strings.Join(append(head, hints), "  "))
-	status := styleMuted.Render(a.screenTitle() + " · poll " + a.session.Config.RefreshInterval.String() + " · [ ] views")
+	status := styleMuted.Render(a.screenTitle() + " · auto-refresh every " + a.session.Config.RefreshInterval.String())
 	if a.status != "" {
 		st := styleSuccess
 		if a.statusErr {
 			st = styleError
 		}
-		status = st.Render(line(a.status, max(a.width-12, 1))) + styleMuted.Render(" · ! details")
+		more := " · ! details"
+		if a.lastMessage == a.status && lipgloss.Width(a.status) <= a.width {
+			more = "" // nothing more to show
+		}
+		status = st.Render(line(a.status, max(a.width-lipgloss.Width(more), 1))) + styleMuted.Render(more)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left,
 		block(status, a.width, 1), block(hints, a.width, 1))
@@ -574,7 +589,16 @@ func (a *App) helpContent() string {
 		}
 		return b.String()
 	}
-	return render("This view", a.current().Keys()) + "\n" + render("Global", globalKeys)
+	about := ""
+	if d, ok := a.current().(interface{ About() string }); ok {
+		about = wrap(d.About(), a.help.Width) + "\n"
+	}
+	tips := styleSection.Render("Tips") + "\n" + wrap(
+		"• The footer always lists the most useful keys for the current view.\n"+
+			"• Press ctrl+p and type what you want to do if you forget a key.\n"+
+			"• While you are typing in a field, single-letter shortcuts are off; press esc to stop typing.\n"+
+			"• Anything that deletes data asks for confirmation; press y to confirm.", a.help.Width) + "\n"
+	return about + render("Keys in this view", a.current().Keys()) + "\n" + render("Everywhere", globalKeys) + "\n" + tips
 }
 
 func (a *App) screenTitle() string {

@@ -22,10 +22,9 @@ import (
 var webhookMethods = []string{http.MethodPost, http.MethodGet, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead}
 
 const (
-	fieldNone = iota - 1
-	fieldMethod
-	fieldPath
+	fieldMethod = iota
 	fieldMode
+	fieldPath
 	fieldHeaders
 	fieldBody
 	fieldCount
@@ -45,7 +44,8 @@ type webhookScreen struct {
 	headers  textinput.Model
 	body     textarea.Model
 	response viewport.Model
-	focus    int
+	focus    int  // selected field
+	editing  bool // typing into the selected text field
 	workflow string
 	sending  bool
 	presetIx int
@@ -61,7 +61,7 @@ func newWebhook(s *Session) *webhookScreen {
 
 	h := textinput.New()
 	h.Prompt = ""
-	h.Placeholder = "X-Header: value; Other: value"
+	h.Placeholder = "optional, e.g. X-Token: abc; X-Env: dev"
 	h.CharLimit = 2048
 
 	b := textarea.New()
@@ -70,41 +70,55 @@ func newWebhook(s *Session) *webhookScreen {
 	b.CharLimit = 0
 	b.SetValue("{\n  \n}")
 
-	w := &webhookScreen{s: s, path: p, headers: h, body: b, response: viewport.New(0, 0), focus: fieldNone, presetIx: -1}
+	w := &webhookScreen{s: s, path: p, headers: h, body: b, response: viewport.New(0, 0), focus: fieldPath, presetIx: -1}
 	w.response.SetContent(styleMuted.Render(webhookHint))
 	return w
 }
 
-const webhookHint = `Send an HTTP request to an n8n Webhook node.
+const webhookHint = `Send an HTTP request to a workflow's Webhook trigger node.
 
-• production (/webhook/…) requires the workflow to be active.
-• test (/webhook-test/…) requires "Listen for test event" in the n8n editor.
+How to use this view:
+  1. Press ctrl+n to pick a workflow's webhook (or select Path and type one).
+  2. ↑/↓ selects a field, enter edits it, esc stops editing.
+  3. Press ctrl+s to send. The response appears here.
 
-ctrl+s sends · ctrl+n cycles webhook triggers of known workflows · tab moves between fields`
+Modes:
+  • production (/webhook/…) only works while the workflow is active.
+  • test (/webhook-test/…) only works while "Listen for test event" is
+    running in the n8n editor.`
 
-// Init focuses the path field, unless a preset (applied just before the
-// first activation) already chose a field.
-func (w *webhookScreen) Init() tea.Cmd {
-	if w.focus == fieldNone {
-		return w.setFocus(fieldPath)
-	}
-	return w.setFocus(w.focus)
-}
+func (w *webhookScreen) Init() tea.Cmd { return nil }
 
 func (w *webhookScreen) Refresh(bool) tea.Cmd { return nil }
 
-func (w *webhookScreen) Capturing() bool { return w.focus != fieldNone }
+// Capturing is true only while typing, so view shortcuts (1-7, q, ...) keep
+// working whenever the user is just moving between fields.
+func (w *webhookScreen) Capturing() bool { return w.editing }
+
+func (w *webhookScreen) About() string {
+	return "Send a test request to a workflow's Webhook trigger and see n8n's response."
+}
 
 func (w *webhookScreen) Keys() []keyHelp {
-	if w.focus == fieldNone {
-		return []keyHelp{{"enter/tab", "edit"}, {"ctrl+s", "send"}, {"ctrl+n", "next preset"}}
+	if w.editing {
+		k := []keyHelp{{"esc", "stop editing"}, {"ctrl+s", "send"}, {"tab", "next field"}}
+		if w.focus == fieldBody {
+			k = append(k, keyHelp{"enter", "new line"})
+		}
+		return k
 	}
-	k := []keyHelp{{"ctrl+s", "send"}, {"tab", "next field"}, {"ctrl+n", "next preset"}, {"esc", "stop editing"}}
-	if w.focus == fieldMethod || w.focus == fieldMode {
-		k = append([]keyHelp{{"←/→", "change"}}, k...)
+	k := []keyHelp{{"ctrl+s", "send"}, {"↑/↓", "select field"}}
+	if isTextField(w.focus) {
+		k = append(k, keyHelp{"enter", "edit " + strings.ToLower(fieldNames[w.focus])})
+	} else {
+		k = append(k, keyHelp{"←/→", "change " + strings.ToLower(fieldNames[w.focus])})
 	}
-	return k
+	return append(k, keyHelp{"ctrl+n", "next workflow webhook"}, keyHelp{"pgup/pgdown", "scroll response"})
 }
+
+var fieldNames = [fieldCount]string{"Method", "Mode", "Path", "Headers", "Body"}
+
+func isTextField(f int) bool { return f == fieldPath || f == fieldHeaders || f == fieldBody }
 
 func (w *webhookScreen) SetSize(width, height int) {
 	w.width, w.height = width, height
@@ -132,30 +146,34 @@ func (w *webhookScreen) Preset(p webhookPreset) {
 		}
 	}
 	if p.path == "" {
-		w.response.SetContent(styleWarn.Render(fmt.Sprintf(
-			"%q has no Webhook trigger node; enter a path manually.", p.workflow)) + "\n\n" + styleMuted.Render(webhookHint))
-	}
-	if p.path == "" {
-		w.setFocus(fieldPath)
+		w.response.SetContent(styleWarn.Render(wrap(fmt.Sprintf(
+			"%q has no Webhook trigger node, so it can't be called over HTTP. Add a Webhook node in n8n, or press enter to type a path manually.", p.workflow), w.width)) + "\n\n" + styleMuted.Render(webhookHint))
+		w.setFocus(fieldPath, false)
 	} else {
-		w.setFocus(fieldBody)
+		w.response.SetContent(styleSuccess.Render(fmt.Sprintf("Ready to call %q. Press ctrl+s to send, or enter to edit the body first.", p.workflow)) +
+			"\n\n" + styleMuted.Render(webhookHint))
+		w.setFocus(fieldBody, false)
 	}
 }
 
-func (w *webhookScreen) setFocus(f int) tea.Cmd {
+// setFocus selects field f; edit starts typing into it (text fields only).
+func (w *webhookScreen) setFocus(f int, edit bool) tea.Cmd {
 	w.focus = f
+	w.editing = edit && isTextField(f)
 	w.path.Blur()
 	w.headers.Blur()
 	w.body.Blur()
+	if !w.editing {
+		return nil
+	}
 	switch f {
 	case fieldPath:
 		return w.path.Focus()
 	case fieldHeaders:
 		return w.headers.Focus()
-	case fieldBody:
+	default:
 		return w.body.Focus()
 	}
-	return nil
 }
 
 func (w *webhookScreen) request() api.WebhookRequest {
@@ -188,7 +206,7 @@ func (w *webhookScreen) send() tea.Cmd {
 	}
 	req := w.request()
 	if req.Path == "" {
-		return statusCmd("Webhook path is required", true)
+		return statusCmd("Enter a webhook path first (select Path and press enter), or press ctrl+n to pick a workflow", true)
 	}
 	_, customCT := req.Headers["Content-Type"]
 	if req.Body != "" && !customCT && !json.Valid([]byte(req.Body)) {
@@ -216,13 +234,13 @@ func (w *webhookScreen) cyclePreset() tea.Cmd {
 		}
 	}
 	if len(items) == 0 {
-		return statusCmd("No workflows with Webhook triggers found", true)
+		return statusCmd("No workflow has a Webhook trigger node. Add one in n8n, or type a path manually.", true)
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].wf < items[j].wf })
 	w.presetIx = (w.presetIx + 1) % len(items)
 	it := items[w.presetIx]
 	w.Preset(webhookPreset{workflow: it.wf, method: it.trg.Method, path: it.trg.Path})
-	return statusCmd(fmt.Sprintf("Preset %d/%d: %s (%s)", w.presetIx+1, len(items), it.wf, it.trg.NodeName), false)
+	return statusCmd(fmt.Sprintf("Webhook %d of %d: %s (%s node) · ctrl+n for the next one", w.presetIx+1, len(items), it.wf, it.trg.NodeName), false)
 }
 
 func (w *webhookScreen) Update(msg tea.Msg) tea.Cmd {
@@ -230,7 +248,7 @@ func (w *webhookScreen) Update(msg tea.Msg) tea.Cmd {
 	case webhookResultMsg:
 		w.sending = false
 		if msg.err != nil {
-			w.response.SetContent(styleError.Render("✖ " + msg.err.Error()))
+			w.response.SetContent(styleError.Render(wrap("✖ "+describeError(msg.err), w.width)))
 			return errStatus("Webhook", msg.err)
 		}
 		w.response.SetContent(renderWebhookResponse(msg.resp, w.width))
@@ -241,7 +259,10 @@ func (w *webhookScreen) Update(msg tea.Msg) tea.Cmd {
 	case tea.KeyMsg:
 		return w.handleKey(msg)
 	}
-	// Cursor blink and paste messages belong to the focused editor too.
+	// Cursor blink and paste messages belong to the field being edited.
+	if !w.editing {
+		return nil
+	}
 	var cmd tea.Cmd
 	switch w.focus {
 	case fieldPath:
@@ -255,59 +276,71 @@ func (w *webhookScreen) Update(msg tea.Msg) tea.Cmd {
 }
 
 func (w *webhookScreen) handleKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.String() {
+	k := msg.String()
+	switch k {
 	case "ctrl+s":
 		return w.send()
 	case "ctrl+n":
 		return w.cyclePreset()
-	case "esc":
-		return w.setFocus(fieldNone)
 	case "tab":
-		return w.setFocus((w.focus + 1) % fieldCount)
+		return w.setFocus((w.focus+1)%fieldCount, w.editing)
 	case "shift+tab":
-		return w.setFocus((w.focus - 1 + fieldCount) % fieldCount)
+		return w.setFocus((w.focus-1+fieldCount)%fieldCount, w.editing)
+	}
+	if w.editing {
+		return w.editKey(msg)
 	}
 
-	switch w.focus {
-	case fieldNone:
-		if msg.String() == "enter" {
-			return w.setFocus(fieldPath)
-		}
+	switch k {
+	case "up", "k":
+		return w.setFocus(max(w.focus-1, 0), false)
+	case "down", "j":
+		return w.setFocus(min(w.focus+1, fieldCount-1), false)
+	case "pgup", "pgdown", "ctrl+u", "ctrl+d":
 		var cmd tea.Cmd
 		w.response, cmd = w.response.Update(msg)
 		return cmd
+	}
+	switch w.focus {
 	case fieldMethod:
-		switch msg.String() {
-		case "left", "h":
+		switch k {
+		case "left":
 			w.method = (w.method - 1 + len(webhookMethods)) % len(webhookMethods)
-		case "right", "l", " ", "enter":
+		case "right", " ", "enter":
 			w.method = (w.method + 1) % len(webhookMethods)
 		}
 	case fieldMode:
-		switch msg.String() {
-		case "left", "right", "h", "l", " ", "enter":
+		switch k {
+		case "left", "right", " ", "enter":
 			w.test = !w.test
 		}
-	case fieldPath:
-		if msg.String() == "enter" {
-			return w.setFocus(fieldBody)
+	default:
+		if k == "enter" {
+			return w.setFocus(w.focus, true)
 		}
-		var cmd tea.Cmd
-		w.path, cmd = w.path.Update(msg)
-		return cmd
-	case fieldHeaders:
-		if msg.String() == "enter" {
-			return w.setFocus(fieldBody)
-		}
-		var cmd tea.Cmd
-		w.headers, cmd = w.headers.Update(msg)
-		return cmd
-	case fieldBody:
-		var cmd tea.Cmd
-		w.body, cmd = w.body.Update(msg)
-		return cmd
 	}
 	return nil
+}
+
+func (w *webhookScreen) editKey(msg tea.KeyMsg) tea.Cmd {
+	if msg.String() == "esc" {
+		return w.setFocus(w.focus, false)
+	}
+	var cmd tea.Cmd
+	switch w.focus {
+	case fieldPath, fieldHeaders:
+		if msg.String() == "enter" {
+			return w.setFocus(w.focus, false)
+		}
+		if w.focus == fieldPath {
+			w.path, cmd = w.path.Update(msg)
+		} else {
+			w.headers, cmd = w.headers.Update(msg)
+		}
+	case fieldBody:
+		w.body, cmd = w.body.Update(msg)
+	}
+	return cmd
 }
 
 func renderWebhookResponse(r *models.WebhookResponse, width int) string {
@@ -345,7 +378,10 @@ func renderWebhookResponse(r *models.WebhookResponse, width int) string {
 
 func (w *webhookScreen) View() string {
 	label := func(f int, s string) string {
-		if w.focus == f {
+		switch {
+		case w.focus == f && w.editing:
+			return styleKey.Render("✎ " + s)
+		case w.focus == f:
 			return styleKey.Render("▸ " + s)
 		}
 		return styleMuted.Render("  " + s)
@@ -379,7 +415,14 @@ func (w *webhookScreen) View() string {
 	lines = append(lines, label(fieldPath, "Path    ")+" "+styleMuted.Render(prefix)+w.path.View())
 	lines = append(lines, styleMuted.Render("           → "+w.s.Client.WebhookURL(w.request())))
 	lines = append(lines, label(fieldHeaders, "Headers ")+" "+w.headers.View())
-	lines = append(lines, label(fieldBody, "Body (JSON)"))
+	bodyLabel := label(fieldBody, "Body (JSON)")
+	switch {
+	case w.focus == fieldBody && w.editing:
+		bodyLabel += styleMuted.Render("  editing · esc to stop")
+	case w.focus == fieldBody:
+		bodyLabel += styleMuted.Render("  enter to edit")
+	}
+	lines = append(lines, bodyLabel)
 	lines = append(lines, w.body.View())
 	rule := "── Response "
 	if w.sending {

@@ -26,8 +26,12 @@ func newHealth(s *Session) *healthScreen { return &healthScreen{s: s} }
 func (h *healthScreen) Init() tea.Cmd        { return h.load() }
 func (h *healthScreen) Refresh(bool) tea.Cmd { return h.load() }
 func (h *healthScreen) Capturing() bool      { return false }
-func (h *healthScreen) Keys() []keyHelp      { return []keyHelp{{"r", "re-check"}} }
-func (h *healthScreen) SetSize(w, ht int)    { h.width, h.height = w, ht }
+func (h *healthScreen) Keys() []keyHelp      { return []keyHelp{{"r", "check again"}} }
+
+func (h *healthScreen) About() string {
+	return "Checks each part of the connection separately: is n8n up, is its database ready, and is your API key accepted. Start here when something isn't working."
+}
+func (h *healthScreen) SetSize(w, ht int) { h.width, h.height = w, ht }
 
 func (h *healthScreen) load() tea.Cmd {
 	if h.loading {

@@ -91,7 +91,11 @@ func (d *executionDetailScreen) load() tea.Cmd {
 func (d *executionDetailScreen) Capturing() bool { return false }
 
 func (d *executionDetailScreen) Keys() []keyHelp {
-	return []keyHelp{{"tab", "switch pane"}, {"↑/↓", "select/scroll"}, {"R", "retry"}, {"esc", "back"}}
+	return []keyHelp{{"↑/↓", "pick node / scroll"}, {"tab", "nodes ↔ output"}, {"R", "retry"}, {"esc", "back to list"}}
+}
+
+func (d *executionDetailScreen) About() string {
+	return "One execution, node by node. The left list shows each node's status, run time and item count; the right pane shows the selected node's output JSON or error. The first failing node is selected automatically."
 }
 
 func (d *executionDetailScreen) SetSize(w, h int) {

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -120,6 +121,8 @@ type (
 	statusMsg struct {
 		text  string
 		isErr bool
+		// detail is extra text shown by "!" (raw error, how to fix it).
+		detail string
 	}
 	clearStatusMsg struct{ id int }
 
@@ -164,8 +167,32 @@ func statusCmd(text string, isErr bool) tea.Cmd {
 	return func() tea.Msg { return statusMsg{text: text, isErr: isErr} }
 }
 
-func errStatus(prefix string, err error) tea.Cmd {
-	return statusCmd(prefix+": "+err.Error(), true)
+// errStatus reports a failed action in plain language. The full error and a
+// suggested fix are available with "!".
+func errStatus(action string, err error) tea.Cmd {
+	p := api.Explain(err)
+	msg := statusMsg{text: action + " failed: " + p.Summary, isErr: true, detail: errorDetail(err)}
+	return func() tea.Msg { return msg }
+}
+
+// describeError is a one-paragraph explanation for inline display.
+func describeError(err error) string {
+	p := api.Explain(err)
+	if p.Hint == "" {
+		return p.Summary
+	}
+	return p.Summary + ". " + p.Hint
+}
+
+func errorDetail(err error) string {
+	p := api.Explain(err)
+	var b strings.Builder
+	if p.Hint != "" {
+		b.WriteString("How to fix it:\n" + p.Hint + "\n\n")
+	}
+	b.WriteString("Technical details:\n" + err.Error() + "\n\n")
+	b.WriteString("Still stuck? Press 6 to open the Health view, which checks the connection, database and API key one by one.")
+	return b.String()
 }
 
 func send(msg tea.Msg) tea.Cmd { return func() tea.Msg { return msg } }
