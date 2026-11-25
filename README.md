@@ -2,6 +2,8 @@
 
 **A fast, keyboard-driven terminal app for [n8n](https://n8n.io).**
 
+https://github.com/user-attachments/assets/b8c18eae-3540-459d-b6c5-7e327f91b506
+
 Look after your n8n workflows without opening a browser:
 
 - See every workflow, and switch any of them on or off with one key.
