@@ -32,7 +32,82 @@ It's a single binary with nothing else to install. It starts instantly and only 
 
 ### 1. Install
 
-With Go 1.24 or newer:
+**Download a binary (no Go installation needed):** open the
+[latest release](https://github.com/kaypee90/n8n-tui/releases/latest) and choose
+the archive matching your system:
+
+| System | Archive suffix |
+|--------|----------------|
+| macOS, Apple Silicon | `darwin_arm64.tar.gz` |
+| macOS, Intel | `darwin_amd64.tar.gz` |
+| Linux, Intel/AMD 64-bit | `linux_amd64.tar.gz` |
+| Linux, ARM64 | `linux_arm64.tar.gz` |
+| Windows, Intel/AMD 64-bit | `windows_amd64.zip` |
+| Windows, ARM64 | `windows_arm64.zip` |
+
+Download an archive from the release's **Assets** list, rather than GitHub's
+automatic **Source code** archives. `amd64` means Intel/AMD 64-bit; `arm64` means
+Apple Silicon or another 64-bit ARM CPU. On macOS/Linux, `uname -m` reports
+`x86_64` for `amd64` and `arm64` or `aarch64` for `arm64`.
+
+Each archive includes the executable, README and license. The examples below use
+`0.1.0`; replace the filename with the version and platform you downloaded.
+
+<details>
+<summary>Install on macOS or Linux</summary>
+
+In the directory containing the downloaded archive, extract it and install the
+binary in your user's executable directory. This example is for an Apple
+Silicon Mac; use the matching filename from the table for other systems:
+
+```sh
+tar -xzf n8n-tui_0.1.0_darwin_arm64.tar.gz
+mkdir -p "$HOME/.local/bin"
+install -m 755 n8n-tui "$HOME/.local/bin/n8n-tui"
+export PATH="$HOME/.local/bin:$PATH"
+n8n-tui --version
+```
+
+Add `export PATH="$HOME/.local/bin:$PATH"` to your shell startup file, such as
+`~/.zshrc` or `~/.bashrc`, to keep the command available in new terminals.
+You can also run the extracted binary directly with `./n8n-tui`.
+</details>
+
+<details>
+<summary>Install on Windows (PowerShell)</summary>
+
+In the directory containing the downloaded ZIP, extract it and run the executable:
+
+```powershell
+Expand-Archive .\n8n-tui_0.1.0_windows_amd64.zip -DestinationPath .\n8n-tui
+Set-Location .\n8n-tui
+.\n8n-tui.exe --version
+```
+
+To run `n8n-tui` from any directory, move the extracted folder to a permanent
+location and add that folder to your **user Path** environment variable (search
+Windows for **Edit environment variables for your account**). Open a new
+terminal after changing Path. Without a Path change, run `.\n8n-tui.exe init`
+and `.\n8n-tui.exe` from the extracted folder for setup and normal use.
+</details>
+
+<details>
+<summary>Verify a download or upgrade an existing installation</summary>
+
+Download `checksums.txt` from the **same release** as your archive. Compute the
+archive's SHA-256 hash and compare it with that filename's entry in the file:
+
+- **macOS:** `shasum -a 256 n8n-tui_0.1.0_darwin_arm64.tar.gz`
+- **Linux:** `sha256sum n8n-tui_0.1.0_linux_amd64.tar.gz`
+- **PowerShell:** `Get-FileHash .\n8n-tui_0.1.0_windows_amd64.zip -Algorithm SHA256`
+
+To upgrade, quit n8n-tui, download and extract the newer archive for your system,
+then replace the installed executable. Run `n8n-tui --version` to confirm the
+update. Your configuration is stored separately and is preserved; you do not
+need to run `init` again.
+</details>
+
+**Or install with Go 1.24 or newer:**
 
 ```sh
 go install github.com/kaypee90/n8n-tui/cmd/n8n-tui@latest
@@ -405,8 +480,13 @@ n8n-tui only uses n8n's **public REST API** (`/api/v1`, authenticated with the `
 
 ## Development
 
+The [CI workflow](https://github.com/kaypee90/n8n-tui/blob/main/.github/workflows/ci.yml) runs on every pull request and push to
+`main`. It builds all Go packages, runs the tests with the race detector, and
+runs `go vet`. The release workflow reuses these checks before publishing.
+
 ```sh
 go run ./cmd/n8n-tui        # run from source
+go build ./...             # build all packages
 go test -race ./...         # run the tests
 go vet ./...
 ```
@@ -423,3 +503,37 @@ internal/tui/components/  table, confirmation dialog, formatting helpers
 ```
 
 Each view implements the small `screen` interface in `internal/tui/app.go`. API results are delivered to every view, and keys go only to the visible one. Responses from a previous instance are dropped after you switch instances. The TUI tests drive the whole app against a fake client (`internal/tui/app_test.go`), so most behaviour can be tested without a running n8n.
+
+### Publishing a release
+
+The [Release workflow](https://github.com/kaypee90/n8n-tui/blob/main/.github/workflows/release.yml) runs when a version tag
+such as `v0.1.0` is pushed. It runs the CI build, race-enabled tests and `go vet`,
+then uses [GoReleaser](https://goreleaser.com/) to build all six platform/CPU
+combinations, create the archives and checksums, and publish a GitHub Release
+with generated release notes. The tag's version is embedded in `--version`.
+Tags such as `v0.2.0-rc.1` are automatically marked as prereleases.
+
+After committing and pushing the release workflow and the changes you want to
+ship, tag that commit and push the tag:
+
+```sh
+git tag -a v0.1.0 -m "Release v0.1.0"
+git push origin v0.1.0
+```
+
+Follow the run in the repository's **Actions** tab. When it finishes, downloads
+appear under [Releases](https://github.com/kaypee90/n8n-tui/releases). The workflow
+uses GitHub's automatic `GITHUB_TOKEN`; no additional secret is needed. GitHub
+Actions must be enabled, and the repository must be public for anyone to access
+the downloads.
+
+To check the packaging locally, install GoReleaser **v2.20.3** (the version pinned
+in the workflow), then run:
+
+```sh
+goreleaser check
+goreleaser release --snapshot --clean
+```
+
+This creates preview archives and checksums in the ignored `dist/` directory
+without publishing a release or creating a tag.
