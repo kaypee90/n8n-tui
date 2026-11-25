@@ -13,6 +13,10 @@ Look after your n8n workflows without opening a browser:
 
 It's a single binary with nothing else to install. It starts instantly and only talks to n8n's official REST API.
 
+![Workflows view showing activation states, tags, and the selected workflow's webhook and nodes](docs/screenshots/workflows.png)
+
+*Screenshots show the app rendered with sample data.*
+
 ---
 
 **Contents:**
@@ -163,22 +167,7 @@ If you run `n8n-tui` before setting anything up, it offers to start the wizard f
 
 ## A two-minute tour
 
-When n8n-tui starts you see the **Workflows** view:
-
-```
-⚡ n8n-tui  ·  production  https://n8n.example.com
- 1 Workflows  2 Executions  3 Webhook  4 Logs  5 Credentials  6 Health  7 Settings
-─────────────────────────────────────────────────────────────────────────────────
-╭ ▸ Workflows ──────────────────────────────╮╭ Workflow details ─────────────────╮
-│ 2 workflows · 1 active                    ││ Order Sync                        │
-│ all states · sort: updated                ││ ● active                          │
-│   STATUS     NAME            UPDATED      ││                                   │
-│ ▸ ● active   Order Sync      2h ago       ││ Webhook triggers                  │
-│   ○ inactive Nightly Report  3d ago       ││ POST https://…/webhook/orders     │
-╰ 1/2 ──────────────────────────────────────╯╰───────────────────────────────────╯
-Workflows · auto-refresh every 5s
-enter executions  space activate/deactivate  t run (webhook)  / search  ? help  q quit
-```
+When n8n-tui starts you see the **Workflows** view shown above:
 
 - **Header (top):** the instance you're connected to, and the seven views. Press a number to jump to one.
 - **Main area:** the current view. The pane with the highlighted border and `▸` has focus.
@@ -238,6 +227,8 @@ Opened with `enter` from the Executions view. The top of the screen summarises t
 
 The first failing node is selected for you. While an execution is still running, the inspector keeps updating it without losing your selection or scroll position.
 
+![Execution inspector highlighting a failed CRM request, with per-node timings and the error details](docs/screenshots/execution-inspector.png)
+
 | Key | What it does |
 |-----|--------------|
 | `↑/↓` | Pick a node (left pane) or scroll the output (right pane) |
@@ -252,6 +243,8 @@ A small HTTP client for calling a workflow's Webhook trigger node with your own 
 1. Press `ctrl+n` to fill in the webhook of one of your workflows (press again for the next one). You can also press `w` on the Workflows view.
 2. Move between the fields with `↑/↓`. Press `enter` to edit a text field and `esc` to stop editing. On **Method** and **Mode**, `←/→` (or `enter`) changes the value.
 3. Press `ctrl+s` to send. The status, headers and response body appear at the bottom. Scroll them with `pgup`/`pgdown`.
+
+![Webhook view with a sample JSON payload and a successful HTTP response](docs/screenshots/webhook.png)
 
 | Field | Meaning |
 |-------|---------|

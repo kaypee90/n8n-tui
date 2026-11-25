@@ -29,6 +29,9 @@ archives:
     files:
       - README.md
       - LICENSE
+      - src: docs/screenshots/*.png
+        dst: docs/screenshots
+        strip_parent: true
 
 checksum:
   name_template: checksums.txt
